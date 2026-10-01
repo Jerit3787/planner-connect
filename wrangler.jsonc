@@ -11,6 +11,12 @@
   // Logs are not kept: upstream scrapers print portal errors to the console,
   // and nothing a request carried should persist anywhere (PLANNER.md).
   "observability": { "enabled": false },
+  // Production is reached only at its custom domain, which the app builds
+  // name in CONNECT_URL; no workers.dev address.
+  "workers_dev": false,
+  "routes": [
+    { "pattern": "connect.planner.danplace.tech", "custom_domain": true }
+  ],
   "vars": {
     "FIREBASE_PROJECT_NUMBER": "370448245789",
     "ALLOWED_ORIGINS": "https://beta.planner.danplace.tech,https://planner.danplace.tech",
@@ -23,6 +29,9 @@
     "dev": {
       "name": "planner-connect-dev",
       "workers_dev": true,
+      // routes are inherited: without this, dev would claim production's
+      // domain.
+      "routes": [],
       "observability": { "enabled": false },
       "vars": {
         "FIREBASE_PROJECT_NUMBER": "370448245789",

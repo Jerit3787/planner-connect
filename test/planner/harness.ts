@@ -1,15 +1,20 @@
+import type { RateLimitStore } from "../../src/planner/env";
+
 /** In-memory KV with the subset the rate limiter uses. */
-export function fakeKv(): KVNamespace {
+export function fakeKv(): RateLimitStore {
   const store = new Map<string, string>();
   return {
     get: async (key: string) => store.get(key) ?? null,
     put: async (key: string, value: string) => void store.set(key, value),
-    delete: async (key: string) => void store.delete(key),
-  } as unknown as KVNamespace;
+  };
 }
 
-const enc = (o: unknown) =>
-  Buffer.from(JSON.stringify(o)).toString("base64url");
+const b64url = (bytes: Uint8Array) =>
+  btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+const enc = (o: unknown) => b64url(new TextEncoder().encode(JSON.stringify(o)));
 
 /** A real RS256 App Check token and the JWKS that verifies it. */
 export async function signAppCheckToken(
@@ -42,12 +47,14 @@ export async function signAppCheckToken(
     exp: now + 3600,
     ...claims,
   });
-  const sig = Buffer.from(
-    await crypto.subtle.sign(
-      "RSASSA-PKCS1-v1_5",
-      pair.privateKey,
-      new TextEncoder().encode(`${header}.${payload}`),
+  const sig = b64url(
+    new Uint8Array(
+      await crypto.subtle.sign(
+        "RSASSA-PKCS1-v1_5",
+        pair.privateKey,
+        new TextEncoder().encode(`${header}.${payload}`),
+      ),
     ),
-  ).toString("base64url");
+  );
   return { token: `${header}.${payload}.${sig}`, jwks: { keys: [jwk] } };
 }

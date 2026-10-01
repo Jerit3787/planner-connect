@@ -4,6 +4,7 @@ import upstreamApp from "../index";
 import type { Env } from "./env";
 import { verifyAppCheckToken } from "./appcheck";
 import { failure, sanitiseErrors } from "./errors";
+import { rateLimit } from "./rate-limit";
 
 /**
  * planner-connect: upstream fyutr-connect, unchanged, behind our checks.
@@ -45,6 +46,8 @@ export function createApp(
     }
     return next();
   });
+  // After App Check: a refused request is not counted against anyone.
+  app.use("/institution/*", rateLimit());
 
   app.route("/", deps.upstream ?? upstreamApp);
   return app;

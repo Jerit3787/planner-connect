@@ -16,10 +16,32 @@ export interface Schedule {
   timeSlots: TimeSlot[];
 }
 
+/// The JSON i-Ma'luum's schedule page fetches (see /js/schedule.js there).
+interface IIUMScheduleData {
+  ses: string | number;
+  sem: string | number;
+  all_sem?: { ses: string | number; sem: string | number }[];
+  subjects?: {
+    code?: string;
+    title?: string;
+    sect?: string | number;
+    chr?: string | number;
+    stat?: string;
+    schedule?: {
+      day?: string;
+      start?: string;
+      ends?: string;
+      venue?: string;
+      lect?: string;
+    }[];
+  }[];
+}
+
 export interface SemesterCalendar {
   title: string | null;
   schedules: Schedule[];
 }
+
 
 export class IIUMScraper {
   private cookies: string[] = [];
@@ -189,13 +211,123 @@ export class IIUMScraper {
     });
     this.updateCookies(ticketRes.headers.get("set-cookie"));
 
-    // 4. Get main schedule page to find all semesters
+    // 4. The schedule page. i-Ma'luum now builds the timetable in the browser:
+    // the page names a JSON endpoint and a page token on #schedule-app, and
+    // /js/schedule.js fetches the data from it. Older pages carried the table
+    // itself, which is still parsed below if the endpoint is missing.
     const scheduleUrl = "https://imaluum.iium.edu.my/MyAcademic/schedule";
-    const mainScheduleRes = await fetch(scheduleUrl, {
+    const page = await this.fetchSchedulePage(scheduleUrl);
+    if (page.data !== undefined) {
+      return this.calendarsFromData(page.data, scheduleUrl);
+    }
+    return this.calendarsFromHtml(page.html);
+  }
+
+  /// One schedule page, and its data when the page names an endpoint for it:
+  /// undefined when it doesn't (an older page), null when it has no records.
+  private async fetchSchedulePage(
+    url: string,
+  ): Promise<{ html: string; data?: IIUMScheduleData | null }> {
+    const res = await fetch(url, {
       headers: { "User-Agent": this.userAgent, Cookie: this.getCookieHeader() },
     });
-    const mainScheduleHtml = await mainScheduleRes.text();
+    const html = await res.text();
+    const app = html.match(/<[^>]+id="schedule-app"[^>]*>/i)?.[0];
+    if (!app) return { html };
+    const attr = (name: string) =>
+      this.decodeHtml(app.match(new RegExp(`${name}="([^"]*)"`))?.[1] ?? "");
+    const endpoint = attr("data-endpoint");
+    if (!endpoint) return { html };
 
+    const dataRes = await fetch(new URL(endpoint, url).toString(), {
+      headers: {
+        "User-Agent": this.userAgent,
+        Cookie: this.getCookieHeader(),
+        "X-Page-Token": attr("data-token"),
+        "X-Requested-With": "XMLHttpRequest",
+        Accept: "application/json",
+        Referer: url,
+      },
+    });
+    if (!dataRes.ok) {
+      throw new Error(`Schedule data request failed: ${dataRes.status}`);
+    }
+    const json = (await dataRes.json()) as { data?: IIUMScheduleData | null };
+    return { html, data: json.data ?? null };
+  }
+
+  private async calendarsFromData(
+    first: IIUMScheduleData | null,
+    scheduleUrl: string,
+  ): Promise<SemesterCalendar[]> {
+    if (!first) return [];
+    const calendars = [this.calendarFromData(first)];
+    const others = (first.all_sem ?? []).filter(
+      (s) => !(String(s.ses) === String(first.ses) && String(s.sem) === String(first.sem)),
+    );
+    // One semester at a time. Each page load issues a new page token for the
+    // session and retires the previous one (a 403), and the endpoint answers
+    // 429 to several requests at once.
+    for (const [index, s] of others.entries()) {
+      if (index > 0) await new Promise((resolve) => setTimeout(resolve, 300));
+      const url = `${scheduleUrl}?ses=${encodeURIComponent(String(s.ses))}&sem=${encodeURIComponent(String(s.sem))}`;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const page = await this.fetchSchedulePage(url);
+          if (page.data) calendars.push(this.calendarFromData(page.data));
+          break;
+        } catch (err) {
+          const busy = err instanceof Error && err.message.endsWith(": 429");
+          if (busy && attempt === 0) {
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+            continue;
+          }
+          console.error(`Failed to fetch schedule for sem ${s.sem}, ${s.ses}:`, err);
+          break;
+        }
+      }
+    }
+    return calendars;
+  }
+
+  private calendarFromData(data: IIUMScheduleData): SemesterCalendar {
+    return {
+      title: `Sem ${data.sem}, ${data.ses}`,
+      schedules: (data.subjects ?? []).map((subject) => {
+        const sect = parseInt(String(subject.sect ?? ""));
+        const chr = parseFloat(String(subject.chr ?? ""));
+        const timeSlots: TimeSlot[] = [];
+        for (const slot of subject.schedule ?? []) {
+          const lecturer = (slot.lect ?? "").trim();
+          const venue = (slot.venue ?? "").trim();
+          if (!slot.day || !slot.start || !slot.ends) continue;
+          this.mapDays(String(slot.day)).forEach((day) => {
+            timeSlots.push({
+              day,
+              start: this.parseTime(String(slot.start)),
+              end: this.parseTime(String(slot.ends)),
+              instructor:
+                !lecturer || lecturer === "TO BE DETERMINED" ? null : lecturer,
+              location: venue && venue !== "-" ? venue : null,
+            });
+          });
+        }
+        return {
+          code: (subject.code ?? "").trim(),
+          title: (subject.title ?? "").trim(),
+          section: isNaN(sect) ? null : sect,
+          creditHours: isNaN(chr) ? null : chr,
+          timeSlots,
+        };
+      }),
+    };
+  }
+
+  /// The older pages, which carried the table and the semester links.
+  private async calendarsFromHtml(
+    mainScheduleHtml: string,
+  ): Promise<SemesterCalendar[]> {
+    const scheduleUrl = "https://imaluum.iium.edu.my/MyAcademic/schedule";
     // Debug: Find all links with 'ses='
     const allLinksRegex =
       /<a[^>]+href="([^"]*?ses=[^"]*)"[^>]*>([\s\S]*?)<\/a>/g;

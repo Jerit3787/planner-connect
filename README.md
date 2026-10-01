@@ -1,3 +1,5 @@
+> **This fork** (`planner-connect`) runs fyutr-connect as the timetable import service for Stutastic Planner, behind App Check, a rate limit and sanitised errors. See [PLANNER.md](PLANNER.md). The scrapers are upstream's, unchanged.
+
 # fyutr-connect
 
 **fyutr-connect** is the open-source integration layer that powers schedule scraping for [Fyutr](https://fyutr.app/download) — a timetable app for Malaysian university students.

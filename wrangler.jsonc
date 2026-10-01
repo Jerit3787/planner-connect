@@ -1,10 +1,37 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "fyutr-connect",
-  "main": "src/index.ts",
+  // planner-connect: upstream fyutr-connect behind src/planner/ (see PLANNER.md).
+  "name": "planner-connect",
+  "main": "src/planner/index.ts",
   "compatibility_date": "2026-03-05",
   "assets": {
     "directory": "./public",
     "binding": "ASSETS"
+  },
+  // Logs are not kept: upstream scrapers print portal errors to the console,
+  // and nothing a request carried should persist anywhere (PLANNER.md).
+  "observability": { "enabled": false },
+  "vars": {
+    "FIREBASE_PROJECT_NUMBER": "370448245789",
+    "ALLOWED_ORIGINS": "https://beta.planner.danplace.tech,https://planner.danplace.tech",
+    "RATE_LIMIT_PER_HOUR": "10"
+  },
+  "kv_namespaces": [
+    { "binding": "RATE_LIMIT", "id": "e2e8d11568984c7395a8a8340a4b4e45" }
+  ],
+  "env": {
+    "dev": {
+      "name": "planner-connect-dev",
+      "workers_dev": true,
+      "observability": { "enabled": false },
+      "vars": {
+        "FIREBASE_PROJECT_NUMBER": "370448245789",
+        "ALLOWED_ORIGINS": "https://beta.planner.danplace.tech,http://localhost:8080",
+        "RATE_LIMIT_PER_HOUR": "30"
+      },
+      "kv_namespaces": [
+        { "binding": "RATE_LIMIT", "id": "662cf79e56c740c88e9aed333ecedce7" }
+      ]
+    }
   }
 }
